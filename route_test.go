@@ -37,7 +37,7 @@ func (s *RouteTestSuite) SetupTest() {
 	s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
 	s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 
-	route, err := NewRoute(s.mockConfig, nil)
+	route, err := NewRoute(s.mockConfig, ViewFacade, nil)
 	s.Require().Nil(err)
 	s.route = route
 
@@ -559,7 +559,7 @@ func (s *RouteTestSuite) TestNewRoute() {
 			s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
 			s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 			test.setup()
-			route, err := NewRoute(s.mockConfig, test.parameters)
+			route, err := NewRoute(s.mockConfig, ViewFacade, test.parameters)
 			s.Equal(test.expectError, err)
 			if route != nil {
 				s.Equal(test.expectHTMLRender, route.instance.HTMLRender)

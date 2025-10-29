@@ -29,7 +29,7 @@ func (s *GroupTestSuite) SetupTest() {
 	s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 	ConfigFacade = s.mockConfig
 
-	route, err := NewRoute(s.mockConfig, nil)
+	route, err := NewRoute(s.mockConfig, ViewFacade, nil)
 	s.NoError(err)
 
 	s.route = route

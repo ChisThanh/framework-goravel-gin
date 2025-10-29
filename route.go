@@ -15,6 +15,7 @@ import (
 	"github.com/goravel/framework/contracts/config"
 	contractshttp "github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/contracts/route"
+	contractsview "github.com/goravel/framework/contracts/view"
 	"github.com/goravel/framework/support"
 	"github.com/goravel/framework/support/color"
 	"github.com/goravel/framework/support/str"
@@ -36,7 +37,7 @@ type Route struct {
 	tlsServer *http.Server
 }
 
-func NewRoute(config config.Config, parameters map[string]any) (*Route, error) {
+func NewRoute(config config.Config, viewFacade contractsview.View, parameters map[string]any) (*Route, error) {
 	gin.SetMode(gin.ReleaseMode)
 	gin.DisableBindValidation()
 	engine := gin.New()
@@ -62,13 +63,23 @@ func NewRoute(config config.Config, parameters map[string]any) (*Route, error) {
 				engine.HTMLRender = htmlRender
 			}
 		}
-	}
 
-	if engine.HTMLRender == nil {
-		var err error
-		engine.HTMLRender, err = DefaultTemplate()
-		if err != nil {
-			return nil, err
+		ViewFacade = viewFacade
+		if viewFacade != nil {
+			if viewFactory, ok := config.Get("http.drivers." + driver.(string) + ".view").(func(*gin.Context) contractshttp.ResponseView); ok {
+				ResponseViewFactory = viewFactory
+			} else {
+				if factoryFunc, ok := config.Get("http.drivers." + driver.(string) + ".view").(func(*gin.Context) (contractshttp.ResponseView, error)); ok {
+					ResponseViewFactory = func(ctx *gin.Context) contractshttp.ResponseView {
+						view, err := factoryFunc(ctx)
+						if err != nil {
+							LogFacade.Error(err)
+							return nil
+						}
+						return view
+					}
+				}
+			}
 		}
 	}
 

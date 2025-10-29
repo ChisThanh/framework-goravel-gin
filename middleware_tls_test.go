@@ -55,7 +55,7 @@ func TestTls(t *testing.T) {
 			beforeEach()
 			test.setup()
 
-			route, err := NewRoute(mockConfig, nil)
+			route, err := NewRoute(mockConfig, ViewFacade, nil)
 			assert.Nil(t, err)
 
 			route.setMiddlewares([]contractshttp.Middleware{Tls()})

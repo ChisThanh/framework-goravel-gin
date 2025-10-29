@@ -10,6 +10,7 @@ import (
 
 	contractshttp "github.com/goravel/framework/contracts/http"
 	mocksconfig "github.com/goravel/framework/mocks/config"
+	mocksview "github.com/goravel/framework/mocks/view"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -17,6 +18,7 @@ type ContextResponseSuite struct {
 	suite.Suite
 	route      *Route
 	mockConfig *mocksconfig.Config
+	viewFace   *mocksview.View
 }
 
 func TestContextResponseSuite(t *testing.T) {
@@ -29,7 +31,7 @@ func (s *ContextResponseSuite) SetupTest() {
 	s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 
 	var err error
-	s.route, err = NewRoute(s.mockConfig, nil)
+	s.route, err = NewRoute(s.mockConfig, s.viewFace, nil)
 	s.Require().Nil(err)
 }
 

@@ -102,7 +102,12 @@ func (r *ContextResponse) Stream(code int, step func(w contractshttp.StreamWrite
 }
 
 func (r *ContextResponse) View() contractshttp.ResponseView {
-	return NewView(r.instance)
+	if ViewFacade == nil || ResponseViewFactory == nil {
+		LogFacade.Warning("ResponseViewFactory is not configured, using default NewView")
+		return nil
+	}
+
+	return ResponseViewFactory(r.instance)
 }
 
 func (r *ContextResponse) WithoutCookie(name string) contractshttp.ContextResponse {

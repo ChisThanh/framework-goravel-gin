@@ -19,6 +19,7 @@ import (
 	mocksconfig "github.com/goravel/framework/mocks/config"
 	mocksfilesystem "github.com/goravel/framework/mocks/filesystem"
 	mockslog "github.com/goravel/framework/mocks/log"
+	mocksview "github.com/goravel/framework/mocks/view"
 	"github.com/goravel/framework/session"
 	"github.com/goravel/framework/support/json"
 	"github.com/goravel/framework/validation"
@@ -31,6 +32,7 @@ type ContextRequestSuite struct {
 	suite.Suite
 	route      *Route
 	mockConfig *mocksconfig.Config
+	viewFace   *mocksview.View
 }
 
 func TestContextRequestSuite(t *testing.T) {
@@ -39,12 +41,13 @@ func TestContextRequestSuite(t *testing.T) {
 
 func (s *ContextRequestSuite) SetupTest() {
 	s.mockConfig = &mocksconfig.Config{}
+	s.viewFace = &mocksview.View{}
 	s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
 	s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 	ValidationFacade = validation.NewValidation()
 
 	var err error
-	route, err := NewRoute(s.mockConfig, nil)
+	route, err := NewRoute(s.mockConfig, s.viewFace, nil)
 	s.Require().NotNil(route)
 	s.Require().NoError(err)
 	s.route = route

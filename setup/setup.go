@@ -16,7 +16,12 @@ var config = `map[string]any{
         "route": func() (route.Route, error) {
             return ginfacades.Route("gin"), nil
         },
-        // Optional, default is http/template
+		// View: Required for View functionality - factory to create View per request
+        // IMPORTANT: Both 'template' and 'view' must be configured to use View features
+        "view": func(ctx *gin.Context) http.ResponseView {
+            return gin.NewView(ctx)
+        },
+		// Template: Required for View functionality - defines HTML template rendering
         "template": func() (render.HTMLRender, error) {
             return gin.DefaultTemplate()
         },
