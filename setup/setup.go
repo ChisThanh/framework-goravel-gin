@@ -18,7 +18,7 @@ var config = `map[string]any{
         },
 		// View: Required for View functionality - factory to create View per request
         // IMPORTANT: Both 'template' and 'view' must be configured to use View features
-        "view": func(ctx *gin.Context) http.ResponseView {
+        "view": func(ctx *ginGonic.Context) http.ResponseView {
             return gin.NewView(ctx)
         },
 		// Template: Required for View functionality - defines HTML template rendering
@@ -38,6 +38,7 @@ func main() {
 				Modify(
 					modify.AddImport("github.com/goravel/framework/contracts/route"), modify.AddImport(packages.GetModulePath()),
 					modify.AddImport("github.com/goravel/gin/facades", "ginfacades"), modify.AddImport("github.com/gin-gonic/gin/render"),
+					modify.AddImport("github.com/gin-gonic/gin", "ginGonic"),
 				).
 				Find(match.Config("http.drivers")).Modify(modify.AddConfig("gin", config)).
 				Find(match.Config("http")).Modify(modify.AddConfig("default", `"gin"`)),
