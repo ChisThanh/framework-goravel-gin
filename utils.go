@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/goravel/framework/contracts/config"
 	httpcontract "github.com/goravel/framework/contracts/http"
 )
 
@@ -36,7 +35,9 @@ func handlerToGinHandler(handler httpcontract.HandlerFunc) gin.HandlerFunc {
 		}()
 
 		if response := handler(context); response != nil {
-			_ = response.Render()
+			if c.Request == nil || c.Request.Context().Err() == nil {
+				_ = response.Render()
+			}
 		}
 	}
 }
@@ -52,11 +53,30 @@ func middlewareToGinHandler(middleware httpcontract.Middleware) gin.HandlerFunc 
 			contextPool.Put(context)
 		}()
 
-		middleware(context)
+		routeInfo := context.Request().Info()
+		if routeInfo.ExcludedMiddleware != nil {
+			for _, excluded := range routeInfo.ExcludedMiddleware {
+				if isSameMiddleware(excluded, middleware) {
+					c.Next()
+					return
+				}
+			}
+		}
+
+		middleware.Handle(context)
 	}
 }
 
-func getDebugLog(config config.Config) gin.HandlerFunc {
+func isSameMiddleware(a, b any) bool {
+	mwA, okA := a.(httpcontract.Middleware)
+	mwB, okB := b.(httpcontract.Middleware)
+	if !okA || !okB {
+		return false
+	}
+	return mwA.Signature() == mwB.Signature()
+}
+
+func logMiddleware() gin.HandlerFunc {
 	logFormatter := func(param gin.LogFormatterParams) string {
 		var statusColor, methodColor, resetColor string
 		if param.IsOutputColor() {
@@ -70,7 +90,7 @@ func getDebugLog(config config.Config) gin.HandlerFunc {
 			param.Latency = param.Latency - param.Latency%time.Second
 		}
 		return fmt.Sprintf("[HTTP] %v |%s %3d %s| %13v | %15s |%s %-7s %s %#v\n%s",
-			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			param.TimeStamp.Format("2006-01-02 15:04:05.000"),
 			statusColor, param.StatusCode, resetColor,
 			param.Latency,
 			param.ClientIP,
@@ -80,11 +100,7 @@ func getDebugLog(config config.Config) gin.HandlerFunc {
 		)
 	}
 
-	if config.GetBool("app.debug") {
-		return gin.LoggerWithFormatter(logFormatter)
-	}
-
-	return nil
+	return gin.LoggerWithFormatter(logFormatter)
 }
 
 func colonToBracket(relativePath string) string {

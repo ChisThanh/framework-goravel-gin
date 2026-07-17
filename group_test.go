@@ -25,12 +25,18 @@ func (s *GroupTestSuite) SetupTest() {
 	routes = make(map[string]map[string]contractshttp.Info)
 
 	s.mockConfig = configmocks.NewConfig(s.T())
-	s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
 	s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
+	s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
+	s.mockConfig.EXPECT().Get("http.drivers.gin.template").Return(nil).Once()
+
 	ConfigFacade = s.mockConfig
 
-	route, err := NewRoute(s.mockConfig, nil)
-	s.NoError(err)
+	route := &Route{
+		config: s.mockConfig,
+		driver: "gin",
+	}
+	err := route.init(nil)
+	s.Require().Nil(err)
 
 	s.route = route
 }
@@ -158,18 +164,14 @@ func (s *GroupTestSuite) TestAny() {
 }
 
 func (s *GroupTestSuite) TestResource() {
-	s.route.setMiddlewares([]contractshttp.Middleware{func(ctx contractshttp.Context) {
-		ctx.WithValue("action", ctx.Request().Origin().Method)
-		ctx.Request().Next()
-	}})
 	s.route.Resource("/resource", resourceController{}).Name("resource")
 
-	s.assert("GET", "/resource", http.StatusOK, "{\"action\":\"GET\"}")
-	s.assert("GET", "/resource/1", http.StatusOK, "{\"action\":\"GET\",\"id\":\"1\"}")
-	s.assert("POST", "/resource", http.StatusOK, "{\"action\":\"POST\"}")
-	s.assert("PUT", "/resource/1", http.StatusOK, "{\"action\":\"PUT\",\"id\":\"1\"}")
-	s.assert("PATCH", "/resource/1", http.StatusOK, "{\"action\":\"PATCH\",\"id\":\"1\"}")
-	s.assert("DELETE", "/resource/1", http.StatusOK, "{\"action\":\"DELETE\",\"id\":\"1\"}")
+	s.assert("GET", "/resource", http.StatusOK, "{\"action\":\"Index\"}")
+	s.assert("GET", "/resource/1", http.StatusOK, "{\"action\":\"Show\",\"id\":\"1\"}")
+	s.assert("POST", "/resource", http.StatusOK, "{\"action\":\"Store\"}")
+	s.assert("PUT", "/resource/1", http.StatusOK, "{\"action\":\"Update\",\"id\":\"1\"}")
+	s.assert("PATCH", "/resource/1", http.StatusOK, "{\"action\":\"Update\",\"id\":\"1\"}")
+	s.assert("DELETE", "/resource/1", http.StatusOK, "{\"action\":\"Destroy\",\"id\":\"1\"}")
 
 	s.Equal(contractshttp.Info{
 		Handler: "github.com/goravel/gin.(resourceController)",
@@ -272,17 +274,12 @@ func (s *GroupTestSuite) TestMultiplePrefixGroupMiddleware() {
 }
 
 func (s *GroupTestSuite) TestGlobalMiddleware() {
-	s.mockConfig.On("Get", "cors.paths").Return([]string{}).Once()
-	s.mockConfig.On("GetString", "http.tls.host").Return("").Once()
-	s.mockConfig.On("GetString", "http.tls.port").Return("").Once()
-	s.mockConfig.On("GetString", "http.tls.ssl.cert").Return("").Once()
-	s.mockConfig.On("GetString", "http.tls.ssl.key").Return("").Once()
-	s.mockConfig.On("GetInt", "http.request_timeout", 3).Return(1).Once()
+	s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
+	s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
+	s.mockConfig.EXPECT().Get("http.drivers.gin.template").Return(nil).Once()
 
-	s.route.GlobalMiddleware(func(ctx contractshttp.Context) {
-		ctx.WithValue("global", "goravel")
-		ctx.Request().Next()
-	})
+	globalMw := &globalMiddlewareStruct{}
+	s.route.GlobalMiddleware(globalMw)
 	s.route.Get("/global-middleware", func(ctx contractshttp.Context) contractshttp.Response {
 		return ctx.Response().Json(http.StatusOK, contractshttp.Json{
 			"global": ctx.Value("global"),
@@ -332,6 +329,18 @@ func (s *GroupTestSuite) TestIssue408() {
 	s.Equal("/prefix/{id}/test/{name}", routes[1].Path)
 }
 
+func (s *GroupTestSuite) TestWithoutMiddleware() {
+	mw := &withoutMiddlewareStruct{}
+
+	s.route.Middleware(mw).WithoutMiddleware(mw).Get("/without", func(ctx contractshttp.Context) contractshttp.Response {
+		return ctx.Response().Json(http.StatusOK, contractshttp.Json{
+			"mw": ctx.Value("mw"),
+		})
+	})
+
+	s.assert("GET", "/without", http.StatusOK, `{"mw":null}`)
+}
+
 func (s *GroupTestSuite) assert(method, url string, expectCode int, expectBody string) {
 	w := httptest.NewRecorder()
 	req, err := http.NewRequest(method, url, nil)
@@ -345,84 +354,113 @@ func (s *GroupTestSuite) assert(method, url string, expectCode int, expectBody s
 	s.Equal(expectCode, w.Code)
 }
 
+type abortMiddlewareStruct struct{}
+
+func (m *abortMiddlewareStruct) Signature() string { return "abort" }
+func (m *abortMiddlewareStruct) Handle(ctx contractshttp.Context) {
+	ctx.Request().Abort(http.StatusNonAuthoritativeInfo)
+}
+
+type contextMiddlewareStruct struct{}
+
+func (m *contextMiddlewareStruct) Signature() string { return "ctx" }
+func (m *contextMiddlewareStruct) Handle(ctx contractshttp.Context) {
+	type customKey struct{}
+	var customKeyCtx customKey
+	ctx.WithValue(customKeyCtx, "context with custom key")
+	ctx.WithValue("ctx", "Goravel")
+
+	ctx.Request().Next()
+}
+
+type contextMiddleware1Struct struct{}
+
+func (m *contextMiddleware1Struct) Signature() string { return "ctx1" }
+func (m *contextMiddleware1Struct) Handle(ctx contractshttp.Context) {
+	ctx.WithValue(2.2, "two point two")
+	ctx.WithValue("ctx1", "Hello")
+
+	ctx.Request().Next()
+}
+
+type contextMiddleware2Struct struct{}
+
+func (m *contextMiddleware2Struct) Signature() string { return "ctx2" }
+func (m *contextMiddleware2Struct) Handle(ctx contractshttp.Context) {
+	ctx.WithValue("ctx2", "World")
+
+	ctx.Request().Next()
+}
+
+type withoutMiddlewareStruct struct{}
+
+func (m *withoutMiddlewareStruct) Signature() string { return "without" }
+func (m *withoutMiddlewareStruct) Handle(ctx contractshttp.Context) {
+	ctx.WithValue("mw", "applied")
+	ctx.Request().Next()
+}
+
+type globalMiddlewareStruct struct{}
+
+func (m *globalMiddlewareStruct) Signature() string { return "global" }
+func (m *globalMiddlewareStruct) Handle(ctx contractshttp.Context) {
+	ctx.WithValue("global", "goravel")
+	ctx.Request().Next()
+}
+
 func abortMiddleware() contractshttp.Middleware {
-	return func(ctx contractshttp.Context) {
-		ctx.Request().Abort(http.StatusNonAuthoritativeInfo)
-	}
+	return &abortMiddlewareStruct{}
 }
 
 func contextMiddleware() contractshttp.Middleware {
-	return func(ctx contractshttp.Context) {
-		type customKey struct{}
-		var customKeyCtx customKey
-		ctx.WithValue(customKeyCtx, "context with custom key")
-		ctx.WithValue("ctx", "Goravel")
-
-		ctx.Request().Next()
-	}
+	return &contextMiddlewareStruct{}
 }
 
 func contextMiddleware1() contractshttp.Middleware {
-	return func(ctx contractshttp.Context) {
-		ctx.WithValue(2.2, "two point two")
-		ctx.WithValue("ctx1", "Hello")
-
-		ctx.Request().Next()
-	}
+	return &contextMiddleware1Struct{}
 }
 
 func contextMiddleware2() contractshttp.Middleware {
-	return func(ctx contractshttp.Context) {
-		ctx.WithValue("ctx2", "World")
-
-		ctx.Request().Next()
-	}
+	return &contextMiddleware2Struct{}
 }
 
 type resourceController struct{}
 
 func (c resourceController) Index(ctx contractshttp.Context) contractshttp.Response {
-	action := ctx.Value("action")
-
 	return ctx.Response().Json(http.StatusOK, contractshttp.Json{
-		"action": action,
+		"action": "Index",
 	})
 }
 
 func (c resourceController) Show(ctx contractshttp.Context) contractshttp.Response {
-	action := ctx.Value("action")
 	id := ctx.Request().Input("id")
 
 	return ctx.Response().Json(http.StatusOK, contractshttp.Json{
-		"action": action,
+		"action": "Show",
 		"id":     id,
 	})
 }
 
 func (c resourceController) Store(ctx contractshttp.Context) contractshttp.Response {
-	action := ctx.Value("action")
-
 	return ctx.Response().Json(http.StatusOK, contractshttp.Json{
-		"action": action,
+		"action": "Store",
 	})
 }
 
 func (c resourceController) Update(ctx contractshttp.Context) contractshttp.Response {
-	action := ctx.Value("action")
 	id := ctx.Request().Input("id")
 
 	return ctx.Response().Json(http.StatusOK, contractshttp.Json{
-		"action": action,
+		"action": "Update",
 		"id":     id,
 	})
 }
 
 func (c resourceController) Destroy(ctx contractshttp.Context) contractshttp.Response {
-	action := ctx.Value("action")
 	id := ctx.Request().Input("id")
 
 	return ctx.Response().Json(http.StatusOK, contractshttp.Json{
-		"action": action,
+		"action": "Destroy",
 		"id":     id,
 	})
 }

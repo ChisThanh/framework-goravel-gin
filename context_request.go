@@ -2,6 +2,7 @@ package gin
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +13,6 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gookit/validate"
 	contractsfilesystem "github.com/goravel/framework/contracts/filesystem"
 	contractshttp "github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/contracts/log"
@@ -80,7 +80,11 @@ func (r *ContextRequest) All() map[string]any {
 	)
 
 	for key, query := range r.instance.Request.URL.Query() {
-		queryMap[key] = strings.Join(query, ",")
+		if len(query) > 1 {
+			queryMap[key] = query
+		} else if len(query) == 1 {
+			queryMap[key] = query[0]
+		}
 	}
 
 	for _, param := range r.instance.Params {
@@ -369,6 +373,14 @@ func (r *ContextRequest) Input(key string, defaultValue ...string) string {
 
 func (r *ContextRequest) InputArray(key string, defaultValue ...[]string) []string {
 	if valueFromHttpBody := r.getValueFromHttpBody(key); valueFromHttpBody != nil {
+		if value, ok := valueFromHttpBody.(string); ok {
+			if value == "" {
+				return []string{}
+			}
+
+			return []string{value}
+		}
+
 		if value := cast.ToStringSlice(valueFromHttpBody); value == nil {
 			return []string{}
 		} else {
@@ -480,17 +492,17 @@ func (r *ContextRequest) Ip() string {
 }
 
 func (r *ContextRequest) Route(key string) string {
-	return r.instance.Param(key)
+	return r.param(key)
 }
 
 func (r *ContextRequest) RouteInt(key string) int {
-	val := r.instance.Param(key)
+	val := r.param(key)
 
 	return cast.ToInt(val)
 }
 
 func (r *ContextRequest) RouteInt64(key string) int64 {
-	val := r.instance.Param(key)
+	val := r.param(key)
 
 	return cast.ToInt64(val)
 }
@@ -513,35 +525,12 @@ func (r *ContextRequest) Url() string {
 	return r.instance.Request.RequestURI
 }
 
-func (r *ContextRequest) Validate(rules map[string]string, options ...contractsvalidate.Option) (contractsvalidate.Validator, error) {
+func (r *ContextRequest) Validate(rules map[string]any, options ...contractsvalidate.Option) (contractsvalidate.Validator, error) {
 	if len(rules) == 0 {
 		return nil, errors.New("rules can't be empty")
 	}
 
-	options = append(options, validation.Rules(rules), validation.CustomRules(r.validation.Rules()), validation.CustomFilters(r.validation.Filters()))
-
-	dataFace, err := validate.FromRequest(r.ctx.Request().Origin())
-	if err != nil {
-		return nil, err
-	}
-
-	for key, query := range r.instance.Request.URL.Query() {
-		if _, exist := dataFace.Get(key); !exist {
-			if _, err := dataFace.Set(key, strings.Join(query, ",")); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	for _, param := range r.instance.Params {
-		if _, exist := dataFace.Get(param.Key); !exist {
-			if _, err := dataFace.Set(param.Key, param.Value); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return r.validation.Make(dataFace, rules, options...)
+	return r.validation.Make(r.ctx, r.All(), rules, options...)
 }
 
 func (r *ContextRequest) ValidateRequest(request contractshttp.FormRequest) (contractsvalidate.Errors, error) {
@@ -560,7 +549,14 @@ func (r *ContextRequest) ValidateRequest(request contractshttp.FormRequest) (con
 		options = append(options, validation.Attributes(requestWithAttributes.Attributes(r.ctx)))
 	}
 	if prepareForValidation, ok := request.(contractshttp.FormRequestWithPrepareForValidation); ok {
-		options = append(options, validation.PrepareForValidation(r.ctx, prepareForValidation.PrepareForValidation))
+		options = append(options, validation.PrepareForValidation(func(ctx context.Context, data contractsvalidate.Data) error {
+			httpCtx, ok := ctx.(contractshttp.Context)
+			if !ok {
+				httpCtx = r.ctx
+			}
+
+			return prepareForValidation.PrepareForValidation(httpCtx, data)
+		}))
 	}
 
 	validator, err := r.Validate(request.Rules(r.ctx), options...)
@@ -599,13 +595,28 @@ func (r *ContextRequest) getValueFromHttpBody(key string) any {
 		case reflect.Slice:
 			if number, err := strconv.Atoi(k); err == nil {
 				return cast.ToStringSlice(current)[number]
-			} else {
-				return nil
 			}
+
+			return nil
+		default:
 		}
 	}
 
 	return current
+}
+
+func (r *ContextRequest) param(key string) string {
+	if val := r.instance.Param(key); val != "" {
+		return val
+	}
+
+	for _, param := range r.instance.Params {
+		if suffix, exist := strings.CutPrefix(param.Key, key); exist && strings.HasSuffix(param.Value, suffix) {
+			return strings.TrimSuffix(param.Value, suffix)
+		}
+	}
+
+	return ""
 }
 
 func getHttpBody(ctx *Context) (map[string]any, error) {

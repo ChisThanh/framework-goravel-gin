@@ -7,12 +7,13 @@ import (
 
 	contractshttp "github.com/goravel/framework/contracts/http"
 	foundationjson "github.com/goravel/framework/foundation/json"
-	configmocks "github.com/goravel/framework/mocks/config"
-	httpmocks "github.com/goravel/framework/mocks/http"
+	mocksconfig "github.com/goravel/framework/mocks/config"
+	mocksview "github.com/goravel/framework/mocks/view"
 	"github.com/goravel/framework/session"
 	"github.com/goravel/framework/support/file"
 	"github.com/goravel/framework/support/path"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestView_Make(t *testing.T) {
@@ -20,8 +21,8 @@ func TestView_Make(t *testing.T) {
 		err        error
 		route      *Route
 		req        *http.Request
-		mockConfig *configmocks.Config
-		mockView   *httpmocks.View
+		mockConfig *mocksconfig.Config
+		mockView   *mocksview.View
 	)
 
 	assert.Nil(t, file.PutContent(path.Resource("views", "empty.tmpl"), `{{ define "empty.tmpl" }}
@@ -33,15 +34,20 @@ func TestView_Make(t *testing.T) {
 {{ .Age }}
 {{ end }}
 `))
+	defer func() {
+		assert.Nil(t, file.Remove(path.Resource()))
+	}()
 
 	beforeEach := func() {
-		mockConfig = &configmocks.Config{}
-		mockConfig.On("GetBool", "app.debug").Return(false).Once()
-		mockConfig.On("GetInt", "http.drivers.gin.body_limit", 4096).Return(4096).Once()
+		mockConfig = mocksconfig.NewConfig(t)
+		mockConfig.EXPECT().GetBool("app.debug").Return(false).Once()
+		mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 		ConfigFacade = mockConfig
 
-		mockView = &httpmocks.View{}
+		mockView = mocksview.NewView(t)
 		ViewFacade = mockView
+
+		mockView.EXPECT().RegisteredViews().Return(nil).Once()
 	}
 	tests := []struct {
 		name        string
@@ -57,7 +63,7 @@ func TestView_Make(t *testing.T) {
 			method: "GET",
 			url:    "/make/empty",
 			setup: func(method, url string) error {
-				mockView.On("GetShared").Return(nil).Once()
+				mockView.EXPECT().GetShared().Return(nil).Once()
 
 				route.Get("/make/empty", func(ctx contractshttp.Context) contractshttp.Response {
 					return ctx.Response().View().Make("empty.tmpl")
@@ -79,7 +85,7 @@ func TestView_Make(t *testing.T) {
 			method: "GET",
 			url:    "/make/data",
 			setup: func(method, url string) error {
-				mockView.On("GetShared").Return(map[string]any{
+				mockView.EXPECT().GetShared().Return(map[string]any{
 					"Name": "test",
 					"Age":  18,
 				}).Once()
@@ -104,7 +110,7 @@ func TestView_Make(t *testing.T) {
 			method: "GET",
 			url:    "/make/data",
 			setup: func(method, url string) error {
-				mockView.On("GetShared").Return(map[string]any{
+				mockView.EXPECT().GetShared().Return(map[string]any{
 					"Name": "test",
 				}).Once()
 
@@ -130,7 +136,7 @@ func TestView_Make(t *testing.T) {
 			method: "GET",
 			url:    "/make/data",
 			setup: func(method, url string) error {
-				mockView.On("GetShared").Return(map[string]any{
+				mockView.EXPECT().GetShared().Return(map[string]any{
 					"Name": "test",
 				}).Once()
 
@@ -157,7 +163,7 @@ func TestView_Make(t *testing.T) {
 			method: "GET",
 			url:    "/make/data",
 			setup: func(method, url string) error {
-				mockView.On("GetShared").Return(map[string]any{
+				mockView.EXPECT().GetShared().Return(map[string]any{
 					"Name": "test",
 				}).Once()
 
@@ -187,7 +193,7 @@ func TestView_Make(t *testing.T) {
 			method: "GET",
 			url:    "/make/data",
 			setup: func(method, url string) error {
-				mockView.On("GetShared").Return(nil).Once()
+				mockView.EXPECT().GetShared().Return(nil).Once()
 
 				route.Get("/make/data", func(ctx contractshttp.Context) contractshttp.Response {
 					assert.Panics(t, func() {
@@ -211,11 +217,18 @@ func TestView_Make(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			beforeEach()
-			route, err = NewRoute(mockConfig, nil)
-			assert.Nil(t, err)
 
-			err := test.setup(test.method, test.url)
-			assert.Nil(t, err)
+			mockConfig.EXPECT().Get("http.drivers.gin.template").Return(nil).Once()
+
+			route = &Route{
+				config: mockConfig,
+				driver: "gin",
+			}
+			err = route.init(nil)
+			require.Nil(t, err)
+
+			err = test.setup(test.method, test.url)
+			require.Nil(t, err)
 
 			w := httptest.NewRecorder()
 			route.ServeHTTP(w, req)
@@ -226,13 +239,8 @@ func TestView_Make(t *testing.T) {
 			}
 
 			assert.Equal(t, test.expectCode, w.Code)
-
-			mockConfig.AssertExpectations(t)
-			mockView.AssertExpectations(t)
 		})
 	}
-
-	assert.Nil(t, file.Remove("resources"))
 }
 
 func TestView_First(t *testing.T) {
@@ -240,8 +248,8 @@ func TestView_First(t *testing.T) {
 		err        error
 		route      *Route
 		req        *http.Request
-		mockConfig *configmocks.Config
-		mockView   *httpmocks.View
+		mockConfig *mocksconfig.Config
+		mockView   *mocksview.View
 	)
 
 	assert.Nil(t, file.PutContent(path.Resource("views", "empty.tmpl"), `{{ define "empty.tmpl" }}
@@ -254,14 +262,20 @@ func TestView_First(t *testing.T) {
 {{ end }}
 `))
 
+	defer func() {
+		assert.Nil(t, file.Remove(path.Resource()))
+	}()
+
 	beforeEach := func() {
-		mockConfig = &configmocks.Config{}
-		mockConfig.On("GetBool", "app.debug").Return(false).Once()
-		mockConfig.On("GetInt", "http.drivers.gin.body_limit", 4096).Return(4096).Once()
+		mockConfig = mocksconfig.NewConfig(t)
+		mockConfig.EXPECT().GetBool("app.debug").Return(false).Once()
+		mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 		ConfigFacade = mockConfig
 
-		mockView = &httpmocks.View{}
+		mockView = mocksview.NewView(t)
 		ViewFacade = mockView
+
+		mockView.EXPECT().RegisteredViews().Return(nil).Once()
 	}
 	tests := []struct {
 		name        string
@@ -277,8 +291,8 @@ func TestView_First(t *testing.T) {
 			method: "GET",
 			url:    "/first",
 			setup: func(method, url string) error {
-				mockView.On("Exists", "empty.tmpl").Return(true).Once()
-				mockView.On("GetShared").Return(nil).Once()
+				mockView.EXPECT().Exists("empty.tmpl").Return(true).Once()
+				mockView.EXPECT().GetShared().Return(nil).Once()
 
 				route.Get("/first", func(ctx contractshttp.Context) contractshttp.Response {
 					return ctx.Response().View().First([]string{"empty.tmpl", "data.tmpl"})
@@ -300,9 +314,9 @@ func TestView_First(t *testing.T) {
 			method: "GET",
 			url:    "/first",
 			setup: func(method, url string) error {
-				mockView.On("Exists", "empty.tmpl").Return(false).Once()
-				mockView.On("Exists", "data.tmpl").Return(true).Once()
-				mockView.On("GetShared").Return(nil).Once()
+				mockView.EXPECT().Exists("empty.tmpl").Return(false).Once()
+				mockView.EXPECT().Exists("data.tmpl").Return(true).Once()
+				mockView.EXPECT().GetShared().Return(nil).Once()
 
 				route.Get("/first", func(ctx contractshttp.Context) contractshttp.Response {
 					return ctx.Response().View().First([]string{"empty.tmpl", "data.tmpl"}, map[string]any{
@@ -327,8 +341,8 @@ func TestView_First(t *testing.T) {
 			method: "GET",
 			url:    "/first",
 			setup: func(method, url string) error {
-				mockView.On("Exists", "empty.tmpl").Return(false).Once()
-				mockView.On("Exists", "data.tmpl").Return(false).Once()
+				mockView.EXPECT().Exists("empty.tmpl").Return(false).Once()
+				mockView.EXPECT().Exists("data.tmpl").Return(false).Once()
 
 				route.Get("/first", func(ctx contractshttp.Context) contractshttp.Response {
 					assert.Panics(t, func() {
@@ -357,10 +371,17 @@ func TestView_First(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			beforeEach()
-			route, err = NewRoute(mockConfig, nil)
-			assert.Nil(t, err)
 
-			err := test.setup(test.method, test.url)
+			mockConfig.EXPECT().Get("http.drivers.gin.template").Return(nil).Once()
+
+			route = &Route{
+				config: mockConfig,
+				driver: "gin",
+			}
+			err = route.init(nil)
+			require.Nil(t, err)
+
+			err = test.setup(test.method, test.url)
 			assert.Nil(t, err)
 
 			w := httptest.NewRecorder()
@@ -370,48 +391,55 @@ func TestView_First(t *testing.T) {
 			}
 
 			assert.Equal(t, test.expectCode, w.Code)
-
-			mockConfig.AssertExpectations(t)
-			mockView.AssertExpectations(t)
 		})
 	}
-
-	assert.Nil(t, file.Remove("resources"))
 }
 
 func TestView_CSRFToken(t *testing.T) {
-
 	assert.Nil(t, file.PutContent(path.Resource("views", "csrf.tmpl"), `{{ define "csrf.tmpl" }}
 csrf_token={{ .csrf_token }}
 {{ end }}
 `))
-	mockConfig := configmocks.NewConfig(t)
+
+	defer func() {
+		assert.Nil(t, file.Remove(path.Resource()))
+	}()
+
+	mockConfig := mocksconfig.NewConfig(t)
 	mockConfig.EXPECT().GetBool("app.debug").Return(false).Once()
 	mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
 	ConfigFacade = mockConfig
 
-	mockView := httpmocks.NewView(t)
+	mockView := mocksview.NewView(t)
 	ViewFacade = mockView
+	mockView.EXPECT().RegisteredViews().Return(nil).Once()
 	mockView.EXPECT().GetShared().Return(map[string]any{}).Once()
 
 	t.Run("CSRF token", func(t *testing.T) {
-		route, err := NewRoute(mockConfig, nil)
-		assert.Nil(t, err)
+		mockConfig.EXPECT().Get("http.drivers.gin.template").Return(nil).Once()
+
+		route := &Route{
+			config: mockConfig,
+			driver: "gin",
+		}
+		err := route.init(nil)
+		require.Nil(t, err)
+
 		route.Get("/csrf", func(ctx contractshttp.Context) contractshttp.Response {
 			sessionData := session.NewSession(sessionKey, nil, foundationjson.New())
 			ctx.Request().SetSession(sessionData)
 			err = sessionData.Regenerate()
 			assert.Nil(t, err)
+
 			return ctx.Response().View().Make("csrf.tmpl")
 		})
+
 		req, err := http.NewRequest("GET", "/csrf", nil)
 		assert.Nil(t, err)
 		w := httptest.NewRecorder()
 		route.ServeHTTP(w, req)
 		assert.Regexp(t, `^\ncsrf_token=([A-Za-z0-9\-_]+)\n$`, w.Body.String())
 	})
-
-	assert.Nil(t, file.Remove("resources"))
 }
 
 func TestStructToMap(t *testing.T) {

@@ -38,20 +38,19 @@ func TestContextRequestSuite(t *testing.T) {
 }
 
 func (s *ContextRequestSuite) SetupTest() {
-	s.mockConfig = &mocksconfig.Config{}
-	s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
+	s.mockConfig = mocksconfig.NewConfig(s.T())
 	s.mockConfig.EXPECT().GetInt("http.drivers.gin.body_limit", 4096).Return(4096).Once()
+	s.mockConfig.EXPECT().GetBool("app.debug").Return(true).Once()
+	s.mockConfig.EXPECT().Get("http.drivers.gin.template").Return(nil).Once()
+
 	ValidationFacade = validation.NewValidation()
 
-	var err error
-	route, err := NewRoute(s.mockConfig, nil)
-	s.Require().NotNil(route)
-	s.Require().NoError(err)
-	s.route = route
-}
-
-func (s *ContextRequestSuite) TearDownTest() {
-	s.mockConfig.AssertExpectations(s.T())
+	s.route = &Route{
+		config: s.mockConfig,
+		driver: "gin",
+	}
+	err := s.route.init(nil)
+	s.Require().Nil(err)
 }
 
 func (s *ContextRequestSuite) TestAll() {
@@ -80,7 +79,7 @@ func (s *ContextRequestSuite) TestAll_GetWithQuery() {
 	s.Require().Nil(err)
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"all\":{\"a\":\"1,2\",\"b\":\"3\"}}", body)
+	s.Equal("{\"all\":{\"a\":[\"1\",\"2\"],\"b\":\"3\"}}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -109,7 +108,7 @@ func (s *ContextRequestSuite) TestAll_PostWithQueryAndForm() {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"all\":{\"a\":\"1,2\",\"b\":\"4\",\"e\":\"e\"}}", body)
+	s.Equal("{\"all\":{\"a\":[\"1\",\"2\"],\"b\":\"4\",\"e\":\"e\"}}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -126,7 +125,7 @@ func (s *ContextRequestSuite) TestAll_PostWithQuery() {
 	req.Header.Set("Content-Type", "multipart/form-data;boundary=0")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"all\":{\"a\":\"1,2\",\"b\":\"3\"}}", body)
+	s.Equal("{\"all\":{\"a\":[\"1\",\"2\"],\"b\":\"3\"}}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -157,7 +156,7 @@ func (s *ContextRequestSuite) TestAll_PostWithJson() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"age\":1,\"all\":{\"Age\":1,\"Name\":\"goravel\",\"a\":\"1,2\",\"name\":\"3\"},\"name\":\"goravel\"}", body)
+	s.Equal("{\"age\":1,\"all\":{\"Age\":1,\"Name\":\"goravel\",\"a\":[\"1\",\"2\"],\"name\":\"3\"},\"name\":\"goravel\"}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -192,7 +191,7 @@ func (s *ContextRequestSuite) TestAll_PostWithErrorJson() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"age\":0,\"all\":{\"a\":\"1,2\",\"name\":\"3\"},\"name\":\"\"}", body)
+	s.Equal("{\"age\":0,\"all\":{\"a\":[\"1\",\"2\"],\"name\":\"3\"},\"name\":\"\"}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -209,7 +208,7 @@ func (s *ContextRequestSuite) TestAll_PostWithEmptyJson() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"all\":{\"a\":\"1,2\",\"name\":\"3\"}}", body)
+	s.Equal("{\"all\":{\"a\":[\"1\",\"2\"],\"name\":\"3\"}}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -231,7 +230,7 @@ func (s *ContextRequestSuite) TestAll_PostWithMiddleware() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"all\":{\"Age\":1,\"Name\":\"goravel\",\"a\":\"1,2\",\"name\":\"3\"},\"middleware\":{\"Age\":1,\"Name\":\"goravel\",\"a\":\"1,2\",\"name\":\"3\"}}", body)
+	s.Equal("{\"all\":{\"Age\":1,\"Name\":\"goravel\",\"a\":[\"1\",\"2\"],\"name\":\"3\"},\"middleware\":{\"Age\":1,\"Name\":\"goravel\",\"a\":[\"1\",\"2\"],\"name\":\"3\"}}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -252,7 +251,7 @@ func (s *ContextRequestSuite) TestAll_PutWithJson() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"all\":{\"a\":\"1,2\",\"b\":4,\"e\":\"e\"}}", body)
+	s.Equal("{\"all\":{\"a\":[\"1\",\"2\"],\"b\":4,\"e\":\"e\"}}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -273,7 +272,7 @@ func (s *ContextRequestSuite) TestAll_DeleteWithJson() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("{\"all\":{\"a\":\"1,2\",\"b\":4,\"e\":\"e\"}}", body)
+	s.Equal("{\"all\":{\"a\":[\"1\",\"2\"],\"b\":4,\"e\":\"e\"}}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -1087,6 +1086,61 @@ func (s *ContextRequestSuite) TestInputArray_Form() {
 	s.Equal(http.StatusOK, code)
 }
 
+func (s *ContextRequestSuite) TestInputArray_FormWithSingleValue() {
+	s.route.Post("/input-array/form-single/{id}", func(ctx contractshttp.Context) contractshttp.Response {
+		return ctx.Response().Success().Json(contractshttp.Json{
+			"InputArray":  ctx.Request().InputArray("arr[]"),
+			"InputArray1": ctx.Request().InputArray("arr"),
+		})
+	})
+
+	payload := &bytes.Buffer{}
+	writer := multipart.NewWriter(payload)
+	err := writer.WriteField("arr[]", "123 456 789")
+	s.Require().Nil(err)
+
+	err = writer.Close()
+	s.Require().Nil(err)
+
+	req, err := http.NewRequest("POST", "/input-array/form-single/1?id=2", payload)
+	s.Require().Nil(err)
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	code, body, _, _ := s.request(req)
+
+	s.Equal("{\"InputArray\":[\"123 456 789\"],\"InputArray1\":[\"123 456 789\"]}", body)
+	s.Equal(http.StatusOK, code)
+}
+
+func (s *ContextRequestSuite) TestInputArray_FormWithMultipleValuesContainingSpaces() {
+	s.route.Post("/input-array/form-multiple/{id}", func(ctx contractshttp.Context) contractshttp.Response {
+		return ctx.Response().Success().Json(contractshttp.Json{
+			"InputArray":  ctx.Request().InputArray("arr[]"),
+			"InputArray1": ctx.Request().InputArray("arr"),
+		})
+	})
+
+	payload := &bytes.Buffer{}
+	writer := multipart.NewWriter(payload)
+	err := writer.WriteField("arr[]", "123 456")
+	s.Require().Nil(err)
+
+	err = writer.WriteField("arr[]", "789 012")
+	s.Require().Nil(err)
+
+	err = writer.Close()
+	s.Require().Nil(err)
+
+	req, err := http.NewRequest("POST", "/input-array/form-multiple/1?id=2", payload)
+	s.Require().Nil(err)
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	code, body, _, _ := s.request(req)
+
+	s.Equal("{\"InputArray\":[\"123 456\",\"789 012\"],\"InputArray1\":[\"123 456\",\"789 012\"]}", body)
+	s.Equal(http.StatusOK, code)
+}
+
 func (s *ContextRequestSuite) TestInputArray_Url() {
 	s.route.Post("/input-array/url/{id}", func(ctx contractshttp.Context) contractshttp.Response {
 		return ctx.Response().Success().Json(contractshttp.Json{
@@ -1105,6 +1159,27 @@ func (s *ContextRequestSuite) TestInputArray_Url() {
 	code, body, _, _ := s.request(req)
 
 	s.Equal("{\"string\":[\"string 0\",\"string 1\"],\"string1\":[\"string 0\",\"string 1\"]}", body)
+	s.Equal(http.StatusOK, code)
+}
+
+func (s *ContextRequestSuite) TestInputArray_UrlWithSingleValue() {
+	s.route.Post("/input-array/url-single/{id}", func(ctx contractshttp.Context) contractshttp.Response {
+		return ctx.Response().Success().Json(contractshttp.Json{
+			"string":  ctx.Request().InputArray("string[]"),
+			"string1": ctx.Request().InputArray("string"),
+		})
+	})
+
+	form := neturl.Values{
+		"string[]": {"123 456 789"},
+	}
+	req, err := http.NewRequest("POST", "/input-array/url-single/1?id=2", strings.NewReader(form.Encode()))
+	s.Require().Nil(err)
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	code, body, _, _ := s.request(req)
+
+	s.Equal("{\"string\":[\"123 456 789\"],\"string1\":[\"123 456 789\"]}", body)
 	s.Equal(http.StatusOK, code)
 }
 
@@ -1492,6 +1567,57 @@ func (s *ContextRequestSuite) TestRoute() {
 	s.Equal(http.StatusOK, code)
 }
 
+func (s *ContextRequestSuite) TestRoute_HasSuffix() {
+	s.route.Get("/route/profile/{user}/{username}.json", func(ctx contractshttp.Context) contractshttp.Response {
+		return ctx.Response().Success().Json(contractshttp.Json{
+			"user":     ctx.Request().Route("user"),
+			"username": ctx.Request().Route("username"),
+		})
+	})
+
+	req, err := http.NewRequest("GET", "/route/profile/123/john-doe.json", nil)
+	s.Require().Nil(err)
+
+	code, body, _, _ := s.request(req)
+
+	s.Equal("{\"user\":\"123\",\"username\":\"john-doe\"}", body)
+	s.Equal(http.StatusOK, code)
+}
+
+func (s *ContextRequestSuite) TestRoute_MultipleSuffixes() {
+	s.route.Get("/route/download/{filename}.zip/version/{version}.json", func(ctx contractshttp.Context) contractshttp.Response {
+		return ctx.Response().Success().Json(contractshttp.Json{
+			"filename": ctx.Request().Route("filename"),
+			"version":  ctx.Request().Route("version"),
+		})
+	})
+
+	req, err := http.NewRequest("GET", "/route/download/document.zip/version/1.0.json", nil)
+	s.Require().Nil(err)
+
+	code, body, _, _ := s.request(req)
+
+	s.Equal("{\"filename\":\"document\",\"version\":\"1.0\"}", body)
+	s.Equal(http.StatusOK, code)
+}
+
+func (s *ContextRequestSuite) TestRoute_NoSuffixRegression() {
+	s.route.Get("/route/standard/{id}/{name}", func(ctx contractshttp.Context) contractshttp.Response {
+		return ctx.Response().Success().Json(contractshttp.Json{
+			"id":   ctx.Request().Route("id"),
+			"name": ctx.Request().Route("name"),
+		})
+	})
+
+	req, err := http.NewRequest("GET", "/route/standard/456/jane", nil)
+	s.Require().Nil(err)
+
+	code, body, _, _ := s.request(req)
+
+	s.Equal("{\"id\":\"456\",\"name\":\"jane\"}", body)
+	s.Equal(http.StatusOK, code)
+}
+
 func (s *ContextRequestSuite) TestSession() {
 	s.route.Get("/session", func(ctx contractshttp.Context) contractshttp.Response {
 		ctx.Request().SetSession(session.NewSession("goravel_session", nil, foundationjson.New()))
@@ -1534,10 +1660,10 @@ func (s *ContextRequestSuite) TestSession_NotSet() {
 
 func (s *ContextRequestSuite) TestValidate_GetSuccess() {
 	s.route.Get("/validate/get-success/{uuid}", func(ctx contractshttp.Context) contractshttp.Response {
-		validator, err := ctx.Request().Validate(map[string]string{
+		validator, err := ctx.Request().Validate(map[string]any{
 			"uuid": "min_len:2",
 			"name": "required",
-		}, validation.Filters(map[string]string{
+		}, validation.Filters(map[string]any{
 			"uuid": "trim",
 			"name": "trim",
 		}))
@@ -1574,10 +1700,10 @@ func (s *ContextRequestSuite) TestValidate_GetSuccess() {
 
 func (s *ContextRequestSuite) TestValidate_GetFail() {
 	s.route.Get("/validate/get-fail/{uuid}", func(ctx contractshttp.Context) contractshttp.Response {
-		validator, err := ctx.Request().Validate(map[string]string{
+		validator, err := ctx.Request().Validate(map[string]any{
 			"uuid": "min_len:4",
 			"name": "required",
-		}, validation.Filters(map[string]string{
+		}, validation.Filters(map[string]any{
 			"uuid": "trim",
 			"name": "trim",
 		}))
@@ -1596,18 +1722,18 @@ func (s *ContextRequestSuite) TestValidate_GetFail() {
 
 	code, body, _, _ := s.request(req)
 
-	s.Equal("Validate fail: map[uuid:map[min_len:uuid min length is 4]]", body)
+	s.Equal("Validate fail: map[uuid:map[min_len:The uuid field must be at least 4 characters.]]", body)
 	s.Equal(http.StatusBadRequest, code)
 }
 
 func (s *ContextRequestSuite) TestValidate_PostSuccess() {
 	s.route.Post("/validate/post-success/{id}/{uuid}", func(ctx contractshttp.Context) contractshttp.Response {
-		validator, err := ctx.Request().Validate(map[string]string{
+		validator, err := ctx.Request().Validate(map[string]any{
 			"id":   "required",
 			"uuid": "required",
 			"age":  "required",
 			"name": "required",
-		}, validation.Filters(map[string]string{
+		}, validation.Filters(map[string]any{
 			"id":   "trim",
 			"uuid": "trim",
 			"age":  "trim",
@@ -1655,9 +1781,9 @@ func (s *ContextRequestSuite) TestValidate_PostSuccess() {
 
 func (s *ContextRequestSuite) TestValidate_PostFail() {
 	s.route.Post("/validate/post-fail", func(ctx contractshttp.Context) contractshttp.Response {
-		validator, err := ctx.Request().Validate(map[string]string{
+		validator, err := ctx.Request().Validate(map[string]any{
 			"name1": "required",
-		}, validation.Filters(map[string]string{
+		}, validation.Filters(map[string]any{
 			"name1": "trim",
 		}))
 		if err != nil {
@@ -1681,7 +1807,7 @@ func (s *ContextRequestSuite) TestValidate_PostFail() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("Validate fail: map[name1:map[required:name1 is required to not be empty]]", body)
+	s.Equal("Validate fail: map[name1:map[required:The name1 field is required.]]", body)
 	s.Equal(http.StatusBadRequest, code)
 }
 
@@ -1759,7 +1885,7 @@ func (s *ContextRequestSuite) TestValidateRequest_GetFail() {
 
 	code, body, _, _ := s.request(req)
 
-	s.Equal("Validate fail: map[name:map[required:name is required to not be empty]]", body)
+	s.Equal("Validate fail: map[name:map[required:The name field is required.]]", body)
 	s.Equal(http.StatusBadRequest, code)
 }
 
@@ -1903,7 +2029,7 @@ func (s *ContextRequestSuite) TestValidateRequest_FormFail() {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	code, body, _, _ := s.request(req)
 
-	s.Equal("Validate fail: map[image:map[image:image value must be an image] json:map[json:json value should be a json string]]", body)
+	s.Equal("Validate fail: map[image:map[image:The image field must be an image.] json:map[json:The json field must be a valid JSON string.]]", body)
 	s.Equal(http.StatusBadRequest, code)
 }
 
@@ -1961,7 +2087,7 @@ func (s *ContextRequestSuite) TestValidateRequest_JsonFail() {
 	req.Header.Set("Content-Type", "application/json")
 	code, body, _, _ := s.request(req)
 
-	s.Equal("Validate fail: map[name:map[required:name is required to not be empty]]", body)
+	s.Equal("Validate fail: map[name:map[required:The name field is required.]]", body)
 	s.Equal(http.StatusBadRequest, code)
 }
 
@@ -2140,11 +2266,17 @@ func TestGetValueFromHttpBody(t *testing.T) {
 }
 
 // Timeout creates middleware to set a timeout for a request
-func testAllMiddleware() contractshttp.Middleware {
-	return func(ctx contractshttp.Context) {
-		all := ctx.Request().All()
-		ctx.WithValue("all", all)
 
-		ctx.Request().Next()
-	}
+type testAllMiddlewareStruct struct{}
+
+func (m *testAllMiddlewareStruct) Signature() string { return "testAll" }
+func (m *testAllMiddlewareStruct) Handle(ctx contractshttp.Context) {
+	all := ctx.Request().All()
+	ctx.WithValue("all", all)
+
+	ctx.Request().Next()
+}
+
+func testAllMiddleware() contractshttp.Middleware {
+	return &testAllMiddlewareStruct{}
 }
